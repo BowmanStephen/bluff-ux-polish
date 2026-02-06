@@ -80,7 +80,6 @@ query = """
       labels: { name: { eq: "Agent-Safe" } }
       state: { type: { eq: "backlog" } }
     }
-    orderBy: priority
     first: 10
   ) {
     nodes {
@@ -124,7 +123,8 @@ eligible = [n for n in nodes if n.get("estimate") and n["estimate"] <= 3]
 if not eligible:
     print("NO_ELIGIBLE_ISSUE")
 else:
-    # Already sorted by priority from the API (1=Urgent first)
+    # Sort by priority (1=Urgent, 2=High, ... 4=Low; 0=None goes last)
+    eligible.sort(key=lambda i: i.get("priority") or 999)
     print(json.dumps(eligible[0]))
 PYEOF
 ) || {
