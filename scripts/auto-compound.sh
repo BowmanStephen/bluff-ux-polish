@@ -3,8 +3,9 @@
 # Creates a feature branch, implements the change, and opens a draft PR.
 #
 # Usage: ./scripts/auto-compound.sh [--dry-run]
-#   --dry-run: Print the prompt and config, skip the Claude invocation.
+#   --dry-run: Query Linear and print the prompt, but skip the Claude invocation.
 #
+# Requires: ~/.config/linear/api-key (Personal API key from Linear settings)
 # Designed to run after daily-compound-review.sh (so CLAUDE.md is fresh).
 
 set -euo pipefail
@@ -15,57 +16,14 @@ LOG_DIR="$REPO_DIR/scripts/logs"
 TODAY=$(date +%Y-%m-%d)
 LOG_FILE="$LOG_DIR/auto-compound-${TODAY}.log"
 BUDGET="1.00"
+LINEAR_PROJECT="Rota Fortunae"
+LINEAR_API_KEY_FILE="$HOME/.config/linear/api-key"
 DRY_RUN=false
 
 if [[ "${1:-}" == "--dry-run" ]]; then
   DRY_RUN=true
-  echo "[dry-run] Will print config and prompt, then exit."
+  echo "[dry-run] Will query Linear and print prompt, then exit."
 fi
-
-# ── Append System Prompt ──────────────────────────────────────
-read -r -d '' AGENT_PROMPT << 'PROMPT_EOF' || true
-You are an autonomous nightly agent for the bluff-ux-polish project.
-
-WORKFLOW:
-1. Query Linear (via MCP) for the highest-priority issue in the "Bluff UX Polish"
-   project that has the "Agent-Safe" label, is in "Backlog" status, and is
-   estimated at 3 points or fewer. If no eligible issue exists, output exactly:
-   NO_ELIGIBLE_ISSUE
-   and stop immediately.
-
-2. Output the issue identifier and title on the first line as:
-   ISSUE: <identifier> — <title>
-
-3. Create a feature branch: git checkout -b agent/<identifier-lowercase>
-
-4. Read the full issue description from Linear. Understand what needs to be done.
-
-5. Implement the changes. Follow the project's CLAUDE.md constraints strictly.
-   DO NOT modify: .github/, package.json, package-lock.json, .env*,
-   CLAUDE.md, scripts/, next.config.*
-
-6. After implementation, run verification:
-   npm run lint && npx tsc --noEmit && npm run build && npm test
-
-7. If verification fails, fix the issues and re-run. Maximum 5 attempts.
-   If still failing after 5 attempts, output: FAILED_AFTER_5_ATTEMPTS
-   and stop.
-
-8. Once verification passes, commit all changes:
-   git add -A
-   git commit with a message: "<identifier>: <short description>"
-
-9. Push the branch:
-   git push -u origin agent/<identifier-lowercase>
-
-10. Create a draft PR using gh:
-    gh pr create --draft --title "<identifier>: <title>" --body "..."
-    Include in the PR body: what changed, why, how to verify,
-    and the Linear issue link.
-
-11. Output the PR URL on the final line as:
-    PR_URL: <url>
-PROMPT_EOF
 
 # ── Pre-flight checks ─────────────────────────────────────────
 echo "==> Auto-compound agent starting at $(date)"
@@ -97,6 +55,139 @@ fi
 
 echo "    Git: on main, clean, up to date."
 
+# ── Query Linear API ──────────────────────────────────────────
+echo "==> Querying Linear for Agent-Safe issues..."
+
+if [[ ! -f "$LINEAR_API_KEY_FILE" ]]; then
+  echo "ERROR: Linear API key not found at $LINEAR_API_KEY_FILE"
+  echo "       Generate one at: Linear → Settings → Account → API"
+  exit 1
+fi
+
+LINEAR_API_KEY=$(cat "$LINEAR_API_KEY_FILE")
+
+ISSUE_JSON=$(LINEAR_API_KEY="$LINEAR_API_KEY" LINEAR_PROJECT="$LINEAR_PROJECT" python3 << 'PYEOF'
+import json, urllib.request, os, sys
+
+api_key = os.environ["LINEAR_API_KEY"]
+project = os.environ["LINEAR_PROJECT"]
+
+query = """
+{
+  issues(
+    filter: {
+      project: { name: { eq: "%s" } }
+      labels: { name: { eq: "Agent-Safe" } }
+      state: { type: { eq: "backlog" } }
+    }
+    orderBy: priority
+    first: 10
+  ) {
+    nodes {
+      identifier
+      title
+      description
+      url
+      estimate
+      priority
+    }
+  }
+}
+""" % project
+
+req = urllib.request.Request(
+    "https://api.linear.app/graphql",
+    data=json.dumps({"query": query}).encode(),
+    headers={
+        "Authorization": api_key,
+        "Content-Type": "application/json"
+    }
+)
+
+try:
+    resp = urllib.request.urlopen(req)
+    data = json.loads(resp.read())
+except Exception as e:
+    print("API_ERROR: %s" % str(e), file=sys.stderr)
+    sys.exit(1)
+
+errors = data.get("errors")
+if errors:
+    print("API_ERROR: %s" % errors[0].get("message", "Unknown"), file=sys.stderr)
+    sys.exit(1)
+
+nodes = data.get("data", {}).get("issues", {}).get("nodes", [])
+
+# Filter: must have an estimate, and estimate must be <= 3
+eligible = [n for n in nodes if n.get("estimate") and n["estimate"] <= 3]
+
+if not eligible:
+    print("NO_ELIGIBLE_ISSUE")
+else:
+    # Already sorted by priority from the API (1=Urgent first)
+    print(json.dumps(eligible[0]))
+PYEOF
+) || {
+  echo "ERROR: Linear API query failed. Check your API key."
+  exit 1
+}
+
+if [[ "$ISSUE_JSON" == "NO_ELIGIBLE_ISSUE" ]]; then
+  echo "    No eligible issues found in Linear. Nothing to do."
+  exit 0
+fi
+
+# Parse issue fields
+ISSUE_ID=$(echo "$ISSUE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['identifier'])")
+ISSUE_TITLE=$(echo "$ISSUE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['title'])")
+ISSUE_DESC=$(echo "$ISSUE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('description','No description provided.'))")
+ISSUE_URL=$(echo "$ISSUE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['url'])")
+BRANCH_NAME="agent/$(echo "$ISSUE_ID" | tr '[:upper:]' '[:lower:]')"
+
+echo "    Found: $ISSUE_ID — $ISSUE_TITLE"
+echo "    Branch: $BRANCH_NAME"
+
+# ── Build Agent Prompt ────────────────────────────────────────
+read -r -d '' AGENT_PROMPT << PROMPT_EOF || true
+You are an autonomous nightly agent for the bluff-ux-polish project.
+
+YOUR ASSIGNED ISSUE:
+- Identifier: $ISSUE_ID
+- Title: $ISSUE_TITLE
+- URL: $ISSUE_URL
+- Description:
+$ISSUE_DESC
+
+WORKFLOW:
+1. Create a feature branch: git checkout -b $BRANCH_NAME
+
+2. Implement the changes described above. Follow the project's CLAUDE.md constraints strictly.
+   DO NOT modify: .github/, package.json, package-lock.json, .env*,
+   CLAUDE.md, scripts/, next.config.*
+
+3. After implementation, run verification:
+   npm run lint && npx tsc --noEmit && npm run build && npm test
+
+4. If verification fails, fix the issues and re-run. Maximum 5 attempts.
+   If still failing after 5 attempts, output: FAILED_AFTER_5_ATTEMPTS
+   and stop.
+
+5. Once verification passes, commit all changes:
+   git add -A
+   git commit with a message: "$ISSUE_ID: <short description>"
+
+6. Push the branch:
+   git push -u origin $BRANCH_NAME
+
+7. Create a draft PR using gh:
+   gh pr create --draft --title "$ISSUE_ID: $ISSUE_TITLE" --body "..."
+   Include in the PR body: what changed, why, how to verify,
+   and the Linear issue link: $ISSUE_URL
+
+8. Output the PR URL on the final line as:
+   PR_URL: <url>
+PROMPT_EOF
+
 # ── Dry-run exit ───────────────────────────────────────────────
 if [[ "$DRY_RUN" == true ]]; then
   echo ""
@@ -112,26 +203,19 @@ if [[ "$DRY_RUN" == true ]]; then
 fi
 
 # ── Invoke Claude ──────────────────────────────────────────────
-echo "==> Invoking Claude agent..."
+echo "==> Invoking Claude agent for $ISSUE_ID..."
 
 EXIT_CODE=0
-claude -p "Begin the nightly auto-compound workflow. Follow the system prompt instructions step by step." \
+claude -p "Begin the nightly auto-compound workflow. Implement the assigned issue step by step." \
   --append-system-prompt "$AGENT_PROMPT" \
   --dangerously-skip-permissions \
   --max-budget-usd "$BUDGET" \
   2>&1 | tee "$LOG_FILE" || EXIT_CODE=$?
 
 # ── Parse output ───────────────────────────────────────────────
-if grep -q "NO_ELIGIBLE_ISSUE" "$LOG_FILE" 2>/dev/null; then
-  echo ""
-  echo "==> No eligible issue found in Linear. Nothing to do."
-  git checkout main 2>/dev/null
-  exit 0
-fi
-
 if grep -q "FAILED_AFTER_5_ATTEMPTS" "$LOG_FILE" 2>/dev/null; then
   echo ""
-  echo "==> Agent failed after 5 attempts. Check log: $LOG_FILE"
+  echo "==> Agent failed after 5 attempts on $ISSUE_ID. Check log: $LOG_FILE"
   git checkout main 2>/dev/null
   exit 1
 fi
