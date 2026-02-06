@@ -13,7 +13,7 @@
 
 ## Scripts
 - `scripts/daily-compound-review.sh` — Nightly script that extracts learnings from Claude Code sessions and appends them below.
-- `scripts/auto-compound.sh` — Nightly script that picks a Linear issue and implements it via PR. (STE-255, not yet built)
+- `scripts/auto-compound.sh` — Nightly agent that picks the top `Agent-Safe` Linear issue and implements it via draft PR. Run with `--dry-run` to preview without invoking Claude.
 
 ## Agent Constraints
 
