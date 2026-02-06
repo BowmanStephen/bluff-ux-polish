@@ -1,15 +1,51 @@
-# Bluff UX Polish
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Stack
 - Next.js 16 (App Router, `src/` directory)
-- TypeScript
-- Tailwind CSS v4
+- React 19, TypeScript (strict mode)
+- Tailwind CSS v4 (PostCSS plugin, no `tailwind.config` — theming via `@theme inline` in `globals.css`)
+- Vitest + Testing Library for tests
 - npm
+
+## Commands
+```bash
+npm run dev          # Start dev server
+npm run build        # Production build
+npm run lint         # ESLint (next/core-web-vitals + typescript)
+npx tsc --noEmit     # Typecheck (CI runs this separately from build)
+npm test             # Run tests once (Vitest)
+npm run test:watch   # Run tests in watch mode
+```
+
+CI runs all four checks in order: lint → typecheck → build → test.
+
+## Architecture
+
+Single-page Next.js App Router app. All source code lives under `src/`.
+
+- `src/app/` — App Router: `layout.tsx` (root layout with fonts, skip-to-content), `page.tsx` (home), `globals.css` (Tailwind v4 theme)
+- `src/app/error.tsx` / `global-error.tsx` — Error boundaries (global-error uses inline styles, no CSS dependency)
+- `src/app/manifest.ts`, `robots.ts`, `sitemap.ts` — PWA manifest + SEO config via Next.js dynamic routes
+- `src/app/__tests__/` — Tests colocated via `__tests__` folders alongside routes
+
+No `src/components/`, `src/lib/`, or `src/hooks/` directories yet — create them as needed.
+
+**Path alias:** `@/` → `./src/` (configured in both `tsconfig.json` and `vitest.config.ts`)
 
 ## Conventions
 - Components split at ~150 lines
 - Build UI in blocks (nav → hero → features), not full pages
 - Tailwind for all styling — no CSS modules
+- Dark mode via `prefers-color-scheme` media query (CSS custom properties in `globals.css`)
+- JSON-LD structured data added to pages for SEO
+
+## Testing
+- Vitest with jsdom environment, `@testing-library/react`, `@testing-library/jest-dom`
+- Tests go in `__tests__/` folders next to the code they test (e.g., `src/app/__tests__/page.test.tsx`)
+- `next/image` must be mocked in tests (see existing mock in `page.test.tsx`)
+- Setup file: `vitest.setup.ts` (imports jest-dom matchers)
 
 ## Scripts
 - `scripts/daily-compound-review.sh` — Nightly script that extracts learnings from Claude Code sessions and appends them below.
