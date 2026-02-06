@@ -14,6 +14,7 @@
 ## Scripts
 - `scripts/daily-compound-review.sh` — Nightly script that extracts learnings from Claude Code sessions and appends them below.
 - `scripts/auto-compound.sh` — Nightly agent that picks the top `Agent-Safe` Linear issue and implements it via draft PR. Run with `--dry-run` to preview without invoking Claude.
+- `scripts/nightly-wrapper.sh` — Orchestrator that runs review then auto-compound sequentially. Triggered by launchd at 10:30 PM. Run with `--dry-run` to preview both stages.
 
 ## Agent Constraints
 
