@@ -45,6 +45,7 @@ No `src/components/`, `src/lib/`, or `src/hooks/` directories yet — create the
 - Vitest with jsdom environment, `@testing-library/react`, `@testing-library/jest-dom`
 - Tests go in `__tests__/` folders next to the code they test (e.g., `src/app/__tests__/page.test.tsx`)
 - `next/image` must be mocked in tests (see existing mock in `page.test.tsx`)
+- Run a single test file: `npx vitest src/app/__tests__/page.test.tsx`
 - Setup file: `vitest.setup.ts` (imports jest-dom matchers)
 
 ## Scripts
@@ -99,8 +100,6 @@ These rules govern the autonomous auto-compound agent. They are non-negotiable.
 ## Compound Review: 2026-02-05
 
 
-
-Based on this conversation, I can extract the learnings directly without needing to search files.
 
 ### Gotchas
 - Linear MCP `create_issue_label` API cannot move existing labels into groups or update parent references — only UI drag-and-drop works for reorganizing labels into groups
