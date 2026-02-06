@@ -13,6 +13,47 @@
 
 ## Scripts
 - `scripts/daily-compound-review.sh` — Nightly script that extracts learnings from Claude Code sessions and appends them below.
+- `scripts/auto-compound.sh` — Nightly script that picks a Linear issue and implements it via PR. (STE-255, not yet built)
+
+## Agent Constraints
+
+These rules govern the autonomous auto-compound agent. They are non-negotiable.
+
+### Scope Limits
+- Agent ONLY picks issues labeled `Agent-Safe` in Linear
+- Agent ONLY picks issues estimated at **3 points or fewer** (skip unestimated issues)
+- Agent ONLY works on this repo (`bluff-ux-polish`) — no cross-repo changes
+
+### Branch Rules
+- Agent ALWAYS works on a feature branch (`agent/<issue-identifier>`)
+- Agent NEVER commits directly to `main`
+- Agent NEVER force-pushes
+
+### PR Rules
+- Agent creates **draft PRs only** — never ready-for-review or auto-merge
+- PR title includes the Linear issue identifier (e.g., `STE-XXX: ...`)
+- PR body includes what was changed, why, and how to verify
+
+### Iteration Cap
+- Maximum **5 edit-test cycles** per run before the agent gives up
+- If build/lint/typecheck fails after 5 attempts, abandon the branch and log the failure
+
+### File Restrictions — DO NOT MODIFY
+- `.github/` — CI/CD workflows
+- `package.json` / `package-lock.json` — no dependency changes
+- `.env*` — environment files
+- `CLAUDE.md` — only the review script appends here, not the agent
+- `scripts/` — the agent doesn't modify its own automation scripts
+- `next.config.*` — framework configuration
+
+### Rollback Plan
+- If the agent's PR fails CI: auto-close the PR, leave a comment explaining the failure
+- If the agent cannot find an eligible issue: exit cleanly, log "no eligible issues"
+- All agent activity is logged to `scripts/logs/auto-compound-<date>.log`
+
+### Budget
+- Maximum spend per run: **$1.00 USD** (via `--max-budget-usd`)
+- If the budget is exhausted mid-task, commit whatever progress exists and note it in the PR
 
 ---
 
